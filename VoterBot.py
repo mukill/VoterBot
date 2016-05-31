@@ -6,6 +6,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, \
 import json, requests, urllib
 from urllib import parse, request
 from googleapiclient.discovery import build
+from datetime import datetime, timedelta
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.DEBUG)
@@ -22,10 +23,11 @@ state = dict()
 # Temporary storage for data while gathering info
 context = dict()
 # Important info about a user that the bot will store by mapping user_id >- info
+#This is info that the bot will refer back to in the future
 state_of_residence = dict()
 addresses = dict()
+electionAddress = dict()
 electionDate = dict()
-global job_queue
 
 #Command listener that begins a message chain to gather information from user
 def get_address(bot, update):
@@ -78,19 +80,50 @@ def bot_setup(bot, update):
     #Give the user valuable information about the upcoming election if there is one
     elif chat_state == FINISHED:
         electionDta = findVoterInfo(addresses[user_id])
-        if electionDta == None:
-            bot.sendMessage(chat_id,
-                            text="You have no elections coming up! Make sure to check back and keep up with the news to vote in the future",
-                            reply_markup= register_to_vote_markup)
-        else:
-            state[user_id] = REMINDER_MODE
+
+        try:
+            state[chat_id] = REMINDER_MODE
             electionName = electionDta['election']['name']
-            address = electionDta['pollingLocations'][0]['address']['line1'] + ', ' + electionDta['pollingLocations'][0]['address']['city'] + ', ' + electionDta['pollingLocations'][0]['address']['state'] + ' ' + electionDta['pollingLocations'][0]['address']['zip']
+            electionAddress[user_id] = electionDta['pollingLocations'][0]['address']['line1'] + ', ' + electionDta['pollingLocations'][0]['address']['city'] + ', ' + electionDta['pollingLocations'][0]['address']['state'] + ' ' + electionDta['pollingLocations'][0]['address']['zip']
             electionDate[user_id] = electionDta['election']['electionDay']
-            responseText = "You are done! Your polling location is: %s Your election date is: %s I will send you a reminder every few days!" % (address, electionDate)
-            bot.sendMessage(chat_id,
-                            text= responseText, register_to_vote_markup = ReplyKeyboardMarkup([[KeyboardButton("Done Registering")]],
-                                      one_time_keyboard = True))
+            election_date_object = datetime.strptime(electionDate[user_id], '%Y-%m-%d')
+            responseText = "You are done! Your polling location is: %s Your election date is: %s I will send you a reminder every few days!" % (electionAddress[user_id], electionDate[user_id])
+            info_markup = ReplyKeyboardMarkup([[KeyboardButton("Election Info"), KeyboardButton("Disable Notifications"), KeyboardButton("Enable Notifications")]],
+                                      one_time_keyboard = False)
+            bot.sendMessage(chat_id, text= responseText, reply_markup = info_markup)
+            #Function that will keep sending reminders to user
+            def constantReminderFunction(bot):
+                reminderText = "Don't forget to vote! Your polling location is: %s Your election date is: %s. I will continue to send you a reminder every few days!" % (electionAddress[user_id], electionDate[user_id])
+                bot.sendMessage(chat_id, text= reminderText)
+                now = datetime.datetime.now()
+                timeDiff = election_date_object - now
+                if timeDiff.total_seconds() > 60 * 60 * 24 * 3 and notificationsEnabled:
+                    job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
+            #Function that will send reminder to user the day before the election
+            def lastReminderFunction(bot):
+                reminderText = "Don't forget to vote tomorrow! Your polling location is: %s. This will be my last reminder!" % (electionAddress[user_id])
+                bot.sendMessage(chat_id, text= reminderText)
+            now = datetime.datetime.now()
+            timeDiff = election_date_object - now
+            job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
+            job_queue.put(constantReminderFunction, timeDiff.total_seconds() - (60 * 60 * 24), repeat=False)
+        #Handle Errors when the GET Request does not execute properly due to various problems
+        except (KeyError):
+            error = electionDta['error']['message']
+            if error == 'Failed to parse address':
+                bot.sendMessage(chat_id,text="Invalid Address, use /set to try again")
+            else:
+                bot.sendMessage(chat_id,
+                                text="You have no elections coming up! Make sure to check back and keep up with the news to vote in the future")
+    elif chat_state == REMINDER_MODE:
+        if text == "Disable Notifications":
+            notificationsEnabled = False
+            bot.sendMessage(chat_id, text= "Notifications Disabled. You will not receive a notification after your next one")
+        elif text == "Enable Notifications":
+            notificationsEnabled = True
+            bot.sendMessage(chat_id, text= "Notifications Enabled")
+        elif text == "Election Info":
+            infotext = 'Your polling location is: %s Your election date is: %s' % (electionAddress[user_id],electionDate[user_id])
 
 def googleSearch(searchQuery):
     service = build("customsearch", "v1",
@@ -119,8 +152,10 @@ def error(bot, update, error):
 
 def main():
 # Create the Updater and pass it your bot's token.
-
     #Create the bot
+    global job_queue
+    global notificationsEnabled
+    notificationsEnabled = True
     updater = Updater(BOT_KEY)
     job_queue = updater.job_queue
     # The command
