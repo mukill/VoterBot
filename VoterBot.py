@@ -7,14 +7,12 @@ import json, requests, urllib
 from urllib import parse, request
 from googleapiclient.discovery import build
 
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.DEBUG)
 # Important Values for the Bot
 NAME = "Voter_Help_Bot"
 BOT_KEY = "186316316:AAHeir7pHkLnwxEtw1Yn6M5Scac02iJIZOk"
-GET_ADDRESS,GET_CITY, GET_STATE,GET_ZIP,
- AWAIT_REGISTRATION, FINISHED, REMINDER_MODE = range(7)
+GET_ADDRESS, GET_CITY, GET_STATE,GET_ZIP, AWAIT_REGISTRATION, FINISHED, REMINDER_MODE = range(7)
 apiKey = "AIzaSyBeXcLqyIOqZkIMqGBVJmVLikBkC5QHh6c"
 searchEngineKey = '006560762859714176178:dkkf_njhddu'
 
@@ -27,12 +25,13 @@ context = dict()
 state_of_residence = dict()
 addresses = dict()
 electionDate = dict()
+global job_queue
 
 #Command listener that begins a message chain to gather information from user
 def get_address(bot, update):
     chat_id = update.message.chat_id
     user_id = update.message.from_user.id
-    user_state = state.get(user_id, -1)
+    user_state = state.get(user_id, GET_ADDRESS)
 
     state[user_id] = GET_CITY  # set the state
     bot.sendMessage(chat_id,
@@ -70,10 +69,10 @@ def bot_setup(bot, update):
     elif chat_state == AWAIT_REGISTRATION:
         addresses[user_id] = context[chat_id] + " " + text
         del context[chat_id]
-        state[chat_id] = PROVIDE_INFORMATION
+        state[chat_id] = FINISHED
         register_to_vote_markup = ReplyKeyboardMarkup([[KeyboardButton("Done Registering")]],
                                   one_time_keyboard = True)
-        bot.sendMessage(chat_id, text="Click this link: " + googleSearch('Register to Vote in %s' %state_of_residence[user_id]) + "to register to vote!",
+        bot.sendMessage(chat_id, text="Click this link: " + googleSearch('Register to Vote in %s' %state_of_residence[user_id]) + " to register to vote!",
                                  reply_markup= register_to_vote_markup)
 
     #Give the user valuable information about the upcoming election if there is one
@@ -85,17 +84,13 @@ def bot_setup(bot, update):
                             reply_markup= register_to_vote_markup)
         else:
             state[user_id] = REMINDER_MODE
-            location = electionDta['pollingLocations']['address']
+            electionName = electionDta['election']['name']
+            address = electionDta['pollingLocations'][0]['address']['line1'] + ', ' + electionDta['pollingLocations'][0]['address']['city'] + ', ' + electionDta['pollingLocations'][0]['address']['state'] + ' ' + electionDta['pollingLocations'][0]['address']['zip']
             electionDate[user_id] = electionDta['election']['electionDay']
+            responseText = "You are done! Your polling location is: %s Your election date is: %s I will send you a reminder every few days!" % (address, electionDate)
             bot.sendMessage(chat_id,
-                            text="You are done! Your polling location is: %s Your election date is: %s I will send you a reminder every few days!",
-                            reply_markup= register_to_vote_markup)
-            register_to_vote_markup = ReplyKeyboardMarkup([[KeyboardButton("Done Registering")]],
-                                      one_time_keyboard = True)
-            bot.sendMessage(chat_id,
-                            text="Click this link: " + googleSearch('Register to Vote in %s' %state_of_residence[user_id])
-                             + "to register to vote! Don't forget to keep important information close by",
-                            reply_markup= register_to_vote_markup)
+                            text= responseText, register_to_vote_markup = ReplyKeyboardMarkup([[KeyboardButton("Done Registering")]],
+                                      one_time_keyboard = True))
 
 def googleSearch(searchQuery):
     service = build("customsearch", "v1",
@@ -124,7 +119,8 @@ def error(bot, update, error):
 
 def main():
 # Create the Updater and pass it your bot's token.
-    global job_queue
+
+    #Create the bot
     updater = Updater(BOT_KEY)
     job_queue = updater.job_queue
     # The command
