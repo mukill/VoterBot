@@ -8,8 +8,6 @@ from urllib import parse, request
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.DEBUG)
 # Important Values for the Bot
 NAME = "Voter_Help_Bot"
 BOT_KEY = "186316316:AAHeir7pHkLnwxEtw1Yn6M5Scac02iJIZOk"
@@ -28,6 +26,7 @@ state_of_residence = dict()
 addresses = dict()
 electionAddress = dict()
 electionDate = dict()
+notificationsEnabled = dict()
 
 #Command listener that begins a message chain to gather information from user
 def get_address(bot, update):
@@ -80,9 +79,10 @@ def bot_setup(bot, update):
     #Give the user valuable information about the upcoming election if there is one
     elif chat_state == FINISHED:
         electionDta = findVoterInfo(addresses[user_id])
-
+        #Try giving the user election information based on their provided information
         try:
             state[chat_id] = REMINDER_MODE
+            notificationsEnabled[chat_id] = True
             electionName = electionDta['election']['name']
             electionAddress[user_id] = electionDta['pollingLocations'][0]['address']['line1'] + ', ' + electionDta['pollingLocations'][0]['address']['city'] + ', ' + electionDta['pollingLocations'][0]['address']['state'] + ' ' + electionDta['pollingLocations'][0]['address']['zip']
             electionDate[user_id] = electionDta['election']['electionDay']
@@ -95,36 +95,47 @@ def bot_setup(bot, update):
             def constantReminderFunction(bot):
                 reminderText = "Don't forget to vote! Your polling location is: %s Your election date is: %s. I will continue to send you a reminder every few days!" % (electionAddress[user_id], electionDate[user_id])
                 bot.sendMessage(chat_id, text= reminderText)
-                now = datetime.datetime.now()
+                now = datetime.now()
                 timeDiff = election_date_object - now
-                if timeDiff.total_seconds() > 60 * 60 * 24 * 3 and notificationsEnabled:
+                if timeDiff.total_seconds() > 60 * 60 * 24 * 3 and notificationsEnabled[chat_id]:
                     job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
             #Function that will send reminder to user the day before the election
             def lastReminderFunction(bot):
                 reminderText = "Don't forget to vote tomorrow! Your polling location is: %s. This will be my last reminder!" % (electionAddress[user_id])
                 bot.sendMessage(chat_id, text= reminderText)
-            now = datetime.datetime.now()
+            now = datetime.now()
             timeDiff = election_date_object - now
+            #Add the reminders to the job que
             job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
             job_queue.put(constantReminderFunction, timeDiff.total_seconds() - (60 * 60 * 24), repeat=False)
         #Handle Errors when the GET Request does not execute properly due to various problems
         except (KeyError):
             error = electionDta['error']['message']
             if error == 'Failed to parse address':
-                bot.sendMessage(chat_id,text="Invalid Address, use /set to try again")
+                bot.sendMessage(chat_id, text="Invalid Address, use /set to try again")
             else:
-                bot.sendMessage(chat_id,
-                                text="You have no elections coming up! Make sure to check back and keep up with the news to vote in the future")
+                bot.sendMessage(chat_id, text="You have no elections coming up! Make sure to check back and keep up with the news to vote in the future")
     elif chat_state == REMINDER_MODE:
         if text == "Disable Notifications":
-            notificationsEnabled = False
+            notificationsEnabled[chat_id] = False
             bot.sendMessage(chat_id, text= "Notifications Disabled. You will not receive a notification after your next one")
         elif text == "Enable Notifications":
-            notificationsEnabled = True
+            notificationsEnabled[chat_id] = True
             bot.sendMessage(chat_id, text= "Notifications Enabled")
+            election_date_object = datetime.strptime(electionDate[user_id], '%Y-%m-%d')
+            def constantReminderFunction(bot):
+                reminderText = "Don't forget to vote! Your polling location is: %s Your election date is: %s. I will continue to send you a reminder every few days!" % (electionAddress[user_id], electionDate[user_id])
+                bot.sendMessage(chat_id, text= reminderText)
+                now = datetime.now()
+                timeDiff = election_date_object - now
+                if timeDiff.total_seconds() > 60 * 60 * 24 * 3 and notificationsEnabled[chat_id]:
+                    job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
+            job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3 , repeat=False)
         elif text == "Election Info":
             infotext = 'Your polling location is: %s Your election date is: %s' % (electionAddress[user_id],electionDate[user_id])
+            bot.sendMessage(chat_id, text= infotext)
 
+#Method that uses the Google Custom Search API to search a query
 def googleSearch(searchQuery):
     service = build("customsearch", "v1",
             developerKey=apiKey)
@@ -133,29 +144,30 @@ def googleSearch(searchQuery):
     topResult = res['items'][0]
     topResultURL = topResult['formattedUrl']
     return topResultURL
-
+#Method that finds voter info using the Google Civic Info API based on Address
 def findVoterInfo(address):
     url = "https://www.googleapis.com/civicinfo/v2/voterinfo?address=%s&key=%s" % (address, apiKey)
     electionData = requests.get(url).json()
     return electionData
 
+#Command listener for the help command that assists a user in getting started
 def help(bot, update):
     bot.sendMessage(update.message.chat_id,
                                         text= "Hi, Type /set to reset the bot and get reminded to vote!")
+#Command listener for the start command which begins the bot.
 def start(bot, update):
     bot.sendMessage(update.message.chat_id,
                                         text= "Hi, I am VoterBot, here to ensure you don't forget to vote on time! Type /set to begin!")
 
-
+#Error listener that logs errors
 def error(bot, update, error):
     logging.warning('Update "%s" caused error "%s"' % (update, error))
 
+#Main method that starts the bot
 def main():
 # Create the Updater and pass it your bot's token.
     #Create the bot
     global job_queue
-    global notificationsEnabled
-    notificationsEnabled = True
     updater = Updater(BOT_KEY)
     job_queue = updater.job_queue
     # The command
