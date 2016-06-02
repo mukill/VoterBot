@@ -7,13 +7,16 @@ import json, requests, urllib
 from urllib import parse, request
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
+import tweepy
 
 # Important Values for the Bot
-NAME = "Voter_Help_Bot"
-BOT_KEY = "186316316:AAHeir7pHkLnwxEtw1Yn6M5Scac02iJIZOk"
+NAME = "Voter_Info_Bot"
+BOT_KEY = "227858238:AAFWlKSnNmiokmlPdB6QfBTuYw80F7Hsbws"
 GET_ADDRESS, GET_CITY, GET_STATE, GET_ZIP, AWAIT_REGISTRATION, FINISHED, REMINDER_MODE = range(7)
 apiKey = "AIzaSyBeXcLqyIOqZkIMqGBVJmVLikBkC5QHh6c"
 searchEngineKey = '006560762859714176178:dkkf_njhddu'
+consumer_key = "48Phep53AQ9r2KKtsqi3ZzOvF"
+consumer_secret = "5bMSl0yNKDd19p4rOq2nn3OFV9RlFlD17oJSiWP1sbz8OnFA5U"
 
 
 # States are saved in a dict that maps chat_id -> state
@@ -27,6 +30,7 @@ addresses = dict()
 electionAddress = dict()
 electionDate = dict()
 notificationsEnabled = dict()
+lastCheck = dict()
 
 #Command listener that begins a message chain to gather information from user
 def get_address(bot, update):
@@ -122,12 +126,22 @@ def bot_setup(bot, update):
                                 'location is: %s. This will be' \
                                 ' my last reminder!' % (electionAddress[user_id])
                 bot.sendMessage(chat_id, text= reminderText)
+            #Function that checks for any new tweets from the CNN Politics Twitter
+            def tweetReminderFunction(bot):
+                if notificationsEnabled[chat_id]:
+                    newTweets = newTweetFinder("CNNPolitics", lastCheck[chat_id])
+                    for tweet in newTweets:
+                        bot.sendMessage(chat_id, text= tweet.text)
+                lastCheck[chat_id] = datetime.now()
+
             now = datetime.now()
             timeDiff = election_date_object - now
+            lastCheck[chat_id] = now
             #Add the reminders to the job que
             job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
-            job_queue.put(constantReminderFunction, timeDiff.total_seconds()
+            job_queue.put(lastReminderFunction, timeDiff.total_seconds()
                           - (60 * 60 * 24), repeat=False)
+            job_queue.put(tweetReminderFunction, 60 * 15, repeat=True)
         #Handle Errors when the GET Request does not execute properly
         except (KeyError):
             error = electionDta['error']['message']
@@ -164,6 +178,19 @@ def findVoterInfo(address):
     url = "https://www.googleapis.com/civicinfo/v2/voterinfo?address=%s&key=%s" % (address, apiKey)
     electionData = requests.get(url).json()
     return electionData
+
+def newTweetFinder(query, lastCheck):
+    auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
+    api = tweepy.API(auth)
+    user = api.get_user(query)
+    tweets = user.timeline()
+    newTweets = []
+    if tweets[0].created_at  > lastCheck:
+        for tweet in tweets:
+            if tweet.created_at < lastCheck:
+                break
+            newTweets.append(tweet)
+    return newTweets
 
 #Command listener for the help command that assists a user in getting started
 def help(bot, update):
