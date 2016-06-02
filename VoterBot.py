@@ -130,6 +130,9 @@ def bot_setup(bot, update):
             def tweetReminderFunction(bot):
                 if notificationsEnabled[chat_id]:
                     newTweets = newTweetFinder("CNNPolitics", lastCheck[chat_id])
+                    newTweets += newTweetFinder("AP_Politics", lastCheck[chat_id])
+                    newTweets += newTweetFinder("nprpolitics", lastCheck[chat_id])
+                    newTweets += newTweetFinder("politifact", lastCheck[chat_id])
                     for tweet in newTweets:
                         bot.sendMessage(chat_id, text= tweet.text)
                 lastCheck[chat_id] = datetime.now() + timedelta(hours = 3)
