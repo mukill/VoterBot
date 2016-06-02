@@ -132,11 +132,11 @@ def bot_setup(bot, update):
                     newTweets = newTweetFinder("CNNPolitics", lastCheck[chat_id])
                     for tweet in newTweets:
                         bot.sendMessage(chat_id, text= tweet.text)
-                lastCheck[chat_id] = datetime.now()
+                lastCheck[chat_id] = datetime.now() + timedelta(hours = 3)
 
             now = datetime.now()
             timeDiff = election_date_object - now
-            lastCheck[chat_id] = now
+            lastCheck[chat_id] = now + timedelta(hours = 3)
             #Add the reminders to the job que
             job_queue.put(constantReminderFunction, 60 * 60 * 24 * 3, repeat=False)
             job_queue.put(lastReminderFunction, timeDiff.total_seconds()
@@ -185,9 +185,9 @@ def newTweetFinder(query, lastCheck):
     user = api.get_user(query)
     tweets = user.timeline()
     newTweets = []
-    if tweets[0].created_at  < lastCheck:
+    if tweets[0].created_at  > lastCheck:
         for tweet in tweets:
-            if tweet.created_at > lastCheck:
+            if tweet.created_at < lastCheck:
                 break
             newTweets.append(tweet)
     return newTweets
