@@ -185,9 +185,9 @@ def newTweetFinder(query, lastCheck):
     user = api.get_user(query)
     tweets = user.timeline()
     newTweets = []
-    if tweets[0].created_at  > lastCheck:
+    if tweets[0].created_at  < lastCheck:
         for tweet in tweets:
-            if tweet.created_at < lastCheck:
+            if tweet.created_at > lastCheck:
                 break
             newTweets.append(tweet)
     return newTweets
